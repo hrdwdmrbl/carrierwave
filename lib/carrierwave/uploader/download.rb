@@ -17,6 +17,10 @@ module CarrierWave
         end
 
         def original_filename
+          if file.meta.include? 'content-disposition'
+            match = file.meta['content-disposition'].match(/filename=(\"?)(.+)\1/)
+            return match[2] unless match.nil?
+          end
           File.basename(file.base_uri.path)
         end
 
@@ -54,12 +58,10 @@ module CarrierWave
       # [url (String)] The URL where the remote file is stored
       #
       def download!(uri)
-        unless uri.blank?
-          processed_uri = process_uri(uri)
-          file = RemoteFile.new(processed_uri)
-          raise CarrierWave::DownloadError, "trying to download a file which is not served over HTTP" unless file.http?
-          cache!(file)
-        end
+        processed_uri = process_uri(uri)
+        file = RemoteFile.new(processed_uri)
+        raise CarrierWave::DownloadError, "trying to download a file which is not served over HTTP" unless file.http?
+        cache!(file)
       end
 
       ##

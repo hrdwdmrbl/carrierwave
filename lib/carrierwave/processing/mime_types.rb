@@ -27,6 +27,7 @@ module CarrierWave
     extend ActiveSupport::Concern
 
     included do
+      CarrierWave::Utilities::Deprecation.new "0.11.0", "CarrierWave::MimeTypes is deprecated and will be removed in the future, get the content_type from the SanitizedFile object directly."
       begin
         require "mime/types"
       rescue LoadError => e

@@ -2,6 +2,7 @@
 
 require 'pathname'
 require 'active_support/core_ext/string/multibyte'
+require 'mime/types'
 
 module CarrierWave
 
@@ -30,7 +31,7 @@ module CarrierWave
     end
 
     ##
-    # Returns the filename as is, without sanizting it.
+    # Returns the filename as is, without sanitizing it.
     #
     # === Returns
     #
@@ -244,7 +245,11 @@ module CarrierWave
     #
     def content_type
       return @content_type if @content_type
-      @file.content_type.to_s.chomp if @file.respond_to?(:content_type) and @file.content_type
+      if @file.respond_to?(:content_type) and @file.content_type
+        @content_type = @file.content_type.to_s.chomp
+      elsif path
+        @content_type = ::MIME::Types.type_for(path).first.to_s
+      end
     end
 
     ##

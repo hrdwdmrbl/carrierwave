@@ -11,6 +11,7 @@ require 'carrierwave'
 require 'timecop'
 require 'open-uri'
 require 'sham_rack'
+require 'mini_magick'
 
 require 'mysql2'
 
@@ -36,6 +37,7 @@ def public_path( *paths )
 end
 
 CarrierWave.root = public_path
+I18n.load_path << File.expand_path(File.join(File.dirname(__FILE__), "..", "lib", "carrierwave", "locale", 'en.yml'))
 
 module CarrierWave
   module Test
@@ -104,6 +106,13 @@ module CarrierWave
         end
       end
     end
+
+    module ManipulationHelpers
+      def color_of_pixel(path, x, y)
+        image = ::MiniMagick::Image.open(path)
+        color = image.run_command("convert", "#{image.path}[1x1+#{x}+#{y}]", "-depth", "8", "txt:").split("\n")[1]
+      end
+    end
   end
 end
 
@@ -112,4 +121,5 @@ RSpec.configure do |config|
   config.include CarrierWave::Test::MockFiles
   config.include CarrierWave::Test::MockStorage
   config.include CarrierWave::Test::I18nHelpers
+  config.include CarrierWave::Test::ManipulationHelpers
 end

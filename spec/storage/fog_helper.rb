@@ -233,9 +233,13 @@ end
             end
 
             it "should have an authenticated_url" do
-              if ['AWS', 'Rackspace', 'Google'].include?(@provider)
+              if ['AWS', 'Rackspace', 'Google', 'OpenStack'].include?(@provider)
                 @fog_file.authenticated_url.should_not be_nil
               end
+            end
+
+            it 'should generate correct filename' do
+              @fog_file.filename.should == 'private.txt'
             end
 
             it "should handle query params" do

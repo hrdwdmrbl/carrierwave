@@ -50,44 +50,8 @@ module CarrierWave
         #
         def version(name, options = {}, &block)
           name = name.to_sym
-          unless versions[name]
-            uploader = Class.new(self)
-            const_set("Uploader#{uploader.object_id}".gsub('-', '_'), uploader)
-            uploader.versions = {}
+          build_version(name, options) unless versions[name]
 
-            # Define the enable_processing method for versions so they get the
-            # value from the parent class unless explicitly overwritten
-            uploader.class_eval <<-RUBY, __FILE__, __LINE__ + 1
-              def self.enable_processing(value=nil)
-                self.enable_processing = value if value
-                if !@enable_processing.nil?
-                  @enable_processing
-                else
-                  superclass.enable_processing
-                end
-              end
-            RUBY
-
-            # Add the current version hash to class attribute :versions
-            current_version = {}
-            current_version[name] = {
-              :uploader => uploader,
-              :options  => options
-            }
-            self.versions = versions.merge(current_version)
-
-            versions[name][:uploader].version_names += [name]
-
-            class_eval <<-RUBY
-              def #{name}
-                versions[:#{name}]
-              end
-            RUBY
-            # as the processors get the output from the previous processors as their
-            # input we must not stack the processors here
-            versions[name][:uploader].processors = versions[name][:uploader].processors.dup
-            versions[name][:uploader].processors.clear
-          end
           versions[name][:uploader].class_eval(&block) if block
           versions[name]
         end
@@ -98,6 +62,62 @@ module CarrierWave
             version[:uploader].recursively_apply_block_to_versions(&block)
           end
         end
+
+      private
+
+        def build_version(name, options)
+          uploader = Class.new(self)
+          const_set("Uploader#{uploader.object_id}".gsub('-', '_'), uploader)
+          uploader.version_names += [name]
+          uploader.versions = {}
+          uploader.processors = []
+
+          uploader.class_eval <<-RUBY, __FILE__, __LINE__ + 1
+            # Define the enable_processing method for versions so they get the
+            # value from the parent class unless explicitly overwritten
+            def self.enable_processing(value=nil)
+              self.enable_processing = value if value
+              if !@enable_processing.nil?
+                @enable_processing
+              else
+                superclass.enable_processing
+              end
+            end
+
+            # Regardless of what is set in the parent uploader, do not enforce the
+            # move_to_cache config option on versions because it moves the original
+            # file to the version's target file.
+            #
+            # If you want to enforce this setting on versions, override this method
+            # in each version:
+            #
+            # version :thumb do
+            #   def move_to_cache
+            #     true
+            #   end
+            # end
+            #
+            def move_to_cache
+              false
+            end
+          RUBY
+
+          class_eval <<-RUBY
+            def #{name}
+              versions[:#{name}]
+            end
+          RUBY
+
+          # Add the current version hash to class attribute :versions
+          current_version = {
+            name => {
+              :uploader => uploader,
+              :options  => options
+            }
+          }
+          self.versions = versions.merge(current_version)
+        end
+
       end # ClassMethods
 
       ##
@@ -123,6 +143,33 @@ module CarrierWave
       #
       def version_name
         self.class.version_names.join('_').to_sym unless self.class.version_names.blank?
+      end
+
+      ##
+      #
+      # === Parameters
+      #
+      # [name (#to_sym)] name of the version
+      #
+      # === Returns
+      #
+      # [Boolean] True when the version exists according to its :if condition
+      #
+      def version_exists?(name)
+        name = name.to_sym
+
+        return false unless self.class.versions.has_key?(name)
+
+        condition = self.class.versions[name][:options][:if]
+        if(condition)
+          if(condition.respond_to?(:call))
+            condition.call(self, :version => name, :file => file)
+          else
+            send(condition, file)
+          end
+        else
+          true
+        end
       end
 
       ##
@@ -153,7 +200,7 @@ module CarrierWave
         if (version = args.first) && version.respond_to?(:to_sym)
           raise ArgumentError, "Version #{version} doesn't exist!" if versions[version.to_sym].nil?
           # recursively proxy to version
-          versions[version.to_sym].url(*args[1..-1])
+          versions[version.to_sym].url(*args[1..-1]) if version_exists?(version)
         elsif args.first
           super(args.first)
         else
@@ -190,16 +237,7 @@ module CarrierWave
 
       def active_versions
         versions.select do |name, uploader|
-          condition = self.class.versions[name][:options][:if]
-          if(condition)
-            if(condition.respond_to?(:call))
-              condition.call(self, :version => name, :file => file)
-            else
-              send(condition, file)
-            end
-          else
-            true
-          end
+          version_exists?(name)
         end
       end
 
@@ -240,10 +278,10 @@ module CarrierWave
 
       def store_versions!(new_file, versions=nil)
         if versions
-          Parallel.each(versions, :in_threads => versions.length) { |v| Hash[active_versions][v].store!(new_file) }
+          active = Hash[active_versions]
+          Parallel.each(versions, :in_threads => versions.length) { |v| active[v].try(:store!, new_file) } unless active.empty?
         else
-          a_v = active_versions
-          Parallel.each(a_v, :in_threads => a_v.length) { |name, v| v.store!(new_file) }
+          Parallel.each(active_versions, :in_threads => active_versions.length) { |name, v| v.store!(new_file) }
         end
       end
 
